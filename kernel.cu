@@ -11,17 +11,21 @@
 
 MKL_INT m = 5, nnz = 13;
 
-__global__ void hadamard(int *result, MKL_INT *rows_start_A2, MKL_INT *rows_end_A2, MKL_INT *col_index_A2, MKL_INT no_rows_A, MKL_INT * rows_start_A, MKL_INT * rows_end_A, MKL_INT * col_index_A,
+__global__ void hadamard(int *result, MKL_INT *rows_start_A2,  MKL_INT *col_index_A2, MKL_INT no_rows_A, MKL_INT * rows_start_A, MKL_INT * col_index_A,
 float* values_A2, float * values_A) 
 {
+	int stride_r_index = blockIdx.x * blockDim.x + threadIdx.x;
+	int stride = gridDim.x * blockDim.x;
+
 	int sum = 0;
 	//#pragma omp parallel for shared(sum) reduction(+: sum)
-	for (int r_index = 0; r_index < no_rows_A; r_index++)// Processing each rows of the matrices
+	//for ( 0; r_index < no_rows_A; r_index++)// Processing each rows of the matrices
+	for(int r_index = stride_r_index; r_index < no_rows_A; r_index+=stride)
 	{
 		int A_lower_bound = rows_start_A[r_index] - 1;
-		int A_upper_bound = rows_end_A[r_index] - 2;
+		int A_upper_bound = rows_start_A[r_index+1] - 2;
 		int A2_lower_bound = rows_start_A2[r_index] - 1;
-		int A2_upper_bound = rows_end_A2[r_index] - 2;
+		int A2_upper_bound = rows_start_A2[r_index+1] - 2;
 
 		int A_c_index = A_lower_bound;
 		int A2_c_index = A2_lower_bound;
@@ -63,6 +67,25 @@ int main()
 	sparse_status_t status;
 	clock_t start, end;
 	double time_taken, total_time_taken = 0;
+
+
+	int deviceId;
+	cudaGetDevice(&deviceId);
+
+	cudaDeviceProp props;
+	cudaGetDeviceProperties(&props, deviceId);
+
+	/*
+	 * `props` now contains several properties about the current device.
+	 */
+
+	int computeCapabilityMajor = props.major;
+	int computeCapabilityMinor = props.minor;
+	int multiProcessorCount = props.multiProcessorCount;
+	int warpSize = props.warpSize;
+	
+
+	printf("Device ID: %d\nNumber of SMs: %d\nCompute Capability Major: %d\nCompute Capability Minor: %d\nWarp Size: %d\n", deviceId, multiProcessorCount, computeCapabilityMajor, computeCapabilityMinor, warpSize);
 
 	FILE* fp;
 	//char buff[255];
@@ -124,39 +147,52 @@ int main()
 	MKL_INT * c_rows_start_A, * c_rows_end_A, * c_col_index_A;
 	float* c_values_A2, * c_values_A;
 
-	cudaMallocManaged(&c_rows_start_A2, no_rows_A2 *sizeof(MKL_INT));
-	cudaMallocManaged(&c_rows_end_A2, no_rows_A2 * sizeof(MKL_INT));
-	cudaMallocManaged(&c_rows_start_A, no_rows_A * sizeof(MKL_INT));
-	cudaMallocManaged(&c_rows_end_A, no_rows_A * sizeof(MKL_INT));
+	cudaMallocManaged(&c_rows_start_A2, (no_rows_A2+1) *sizeof(MKL_INT));
+	//cudaMallocManaged(&c_rows_end_A2, no_rows_A2 * sizeof(MKL_INT));
+	cudaMallocManaged(&c_rows_start_A, (no_rows_A+1) * sizeof(MKL_INT));
+	//cudaMallocManaged(&c_rows_end_A, no_rows_A * sizeof(MKL_INT));
 	cudaMallocManaged(&c_col_index_A, rows_end_A[no_rows_A - 1] * sizeof(MKL_INT));
 	cudaMallocManaged(&c_col_index_A2, rows_end_A2[no_rows_A2 - 1] * sizeof(MKL_INT));
 	cudaMallocManaged(&c_values_A, rows_end_A[no_rows_A - 1] * sizeof(float));
 	cudaMallocManaged(&c_values_A2, rows_end_A2[no_rows_A2 - 1] * sizeof(float));
 
-	cudaDeviceSynchronize();
+	int* results;
+	cudaMallocManaged(&results, no_rows_A * sizeof(int));
+	cudaMemPrefetchAsync(results, no_rows_A * sizeof(int),deviceId);
 
-	c_rows_start_A[0] = 1;
-
-	printf("NNZ of A = %d\n", rows_end_A[no_rows_A - 1]);
-	printf("NNZ of A2 = %d\n", rows_end_A2[no_rows_A2 - 1]);
+	//printf("NNZ of A = %d\n", rows_end_A[no_rows_A - 1]);
+	//printf("NNZ of A2 = %d\n", rows_end_A2[no_rows_A2 - 1]);
 
 	for (int i = 0; i < no_rows_A; i++)
 	{
 		c_rows_start_A[i] = rows_start_A[i];
-		c_rows_end_A[i] = rows_end_A[i];
+		//c_rows_end_A[i] = rows_end_A[i];
 		c_rows_start_A2[i] = rows_start_A2[i];
-		c_rows_end_A2[i] = rows_end_A2[i];
+		//c_rows_end_A2[i] = rows_end_A2[i];
 	}
+	c_rows_start_A[no_rows_A] = rows_end_A[no_rows_A - 1];
+	c_rows_start_A2[no_rows_A] = rows_end_A2[no_rows_A - 1];
+
+	cudaMemPrefetchAsync(c_rows_start_A, (no_rows_A + 1) * sizeof(MKL_INT), deviceId);
+	//cudaMemPrefetchAsync(c_rows_end_A, no_rows_A * sizeof(MKL_INT), deviceId);
+	cudaMemPrefetchAsync(c_rows_start_A2, (no_rows_A + 1) * sizeof(MKL_INT), deviceId);
+	//cudaMemPrefetchAsync(c_rows_end_A2, no_rows_A * sizeof(MKL_INT), deviceId);
+
 	for (int i = 0; i < rows_end_A[no_rows_A - 1]; i++)
 	{
 		c_col_index_A[i] = col_index_A[i];
 		c_values_A[i] = values_A[i];
 	}
+	cudaMemPrefetchAsync(c_col_index_A, rows_end_A[no_rows_A - 1] * sizeof(MKL_INT), deviceId);
+	cudaMemPrefetchAsync(c_values_A, rows_end_A[no_rows_A - 1] * sizeof(float), deviceId);
+
 	for (int i = 0; i < rows_end_A2[no_rows_A2 - 1]; i++)
 	{
 		c_col_index_A2[i] = col_index_A2[i];
 		c_values_A2[i] = values_A2[i];
 	}
+	cudaMemPrefetchAsync(c_col_index_A2, rows_end_A2[no_rows_A2 - 1] * sizeof(MKL_INT), deviceId);
+	cudaMemPrefetchAsync(c_values_A2, rows_end_A2[no_rows_A2 - 1] * sizeof(float), deviceId);
 
 	/*printf("\nNNZ of A = %d\n", rows_start_A[no_rows_A] - sparse_index_A);
 	printf("NNZ of A^2 = %d\n", rows_start_A2[no_rows_A2]-sparse_index_A2);*/
@@ -167,14 +203,24 @@ int main()
 	printf("A^2 time = %f\n", time_taken);
 	total_time_taken += time_taken;
 
-	start = clock();
 
 	// Hadamard product and sum together
-	int* results;
-	cudaMallocManaged(&results, no_rows_A * sizeof(int));
 	
-	hadamard<<<1,1>>>(results,c_rows_start_A2, c_rows_end_A2, c_col_index_A2, no_rows_A, c_rows_start_A, c_rows_end_A, c_col_index_A, c_values_A2, c_values_A);
+
+	size_t threads_per_block = 1024;
+	size_t number_of_blocks = multiProcessorCount ;
+		
+	start = clock();
+
+	hadamard<<<number_of_blocks, threads_per_block >>>(results,c_rows_start_A2, c_col_index_A2, no_rows_A, c_rows_start_A, c_col_index_A, c_values_A2, c_values_A);
 	cudaDeviceSynchronize();
+	int sum = 0;
+	
+		
+	for (size_t i = 0; i < no_rows_A; i++)
+	{
+		sum += results[i];
+	}
 
 	end = clock();
 	// Calculating total time taken by the program. 
@@ -183,9 +229,9 @@ int main()
 	total_time_taken += time_taken;
 	printf("Wall time = %f\n", total_time_taken);
 
-	printf("\nsum = %d\n", results[0]);
+	printf("\nsum = %d\n", sum);
 
-	float nT = results[0] / 6;
+	float nT = sum / 6;
 	printf("nT = %.0f\n", nT);
 
 
@@ -196,9 +242,9 @@ int main()
 	free(col);
 	free(val);
 	cudaFree(c_rows_start_A2);
-	cudaFree(c_rows_end_A2);
+	//cudaFree(c_rows_end_A2);
 	cudaFree(c_rows_start_A);
-	cudaFree(c_rows_end_A);
+	//cudaFree(c_rows_end_A);
 	cudaFree(c_col_index_A);
 	cudaFree(c_col_index_A2);
 	cudaFree(c_values_A);
