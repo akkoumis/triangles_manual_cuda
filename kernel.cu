@@ -6,11 +6,12 @@
 #include <mkl_spblas.h>
 #include <malloc.h>
 #include <time.h>
+#include <cuda_runtime.h>
 
 
 MKL_INT m = 5, nnz = 13;
 
-int hadamard(MKL_INT *rows_start_A2, MKL_INT *rows_end_A2, MKL_INT *col_index_A2, MKL_INT no_rows_A, MKL_INT * rows_start_A, MKL_INT * rows_end_A, MKL_INT * col_index_A,
+__global__ void hadamard(int *result, MKL_INT *rows_start_A2, MKL_INT *rows_end_A2, MKL_INT *col_index_A2, MKL_INT no_rows_A, MKL_INT * rows_start_A, MKL_INT * rows_end_A, MKL_INT * col_index_A,
 float* values_A2, float * values_A) 
 {
 	int sum = 0;
@@ -40,7 +41,8 @@ float* values_A2, float * values_A)
 		}
 
 	}
-	return sum;
+	//printf("CUDA sum = %d\n", sum);
+	result[blockIdx.x * blockDim.x + threadIdx.x] = sum;
 }
 
 int main()
@@ -118,36 +120,46 @@ int main()
 	if (status == SPARSE_STATUS_SUCCESS && debugging)
 		printf("A export done with SUCCESS.\n");
 
+	MKL_INT * c_rows_start_A2, * c_rows_end_A2, * c_col_index_A2;
+	MKL_INT * c_rows_start_A, * c_rows_end_A, * c_col_index_A;
+	float* c_values_A2, * c_values_A;
+
+	cudaMallocManaged(&c_rows_start_A2, no_rows_A2 *sizeof(MKL_INT));
+	cudaMallocManaged(&c_rows_end_A2, no_rows_A2 * sizeof(MKL_INT));
+	cudaMallocManaged(&c_rows_start_A, no_rows_A * sizeof(MKL_INT));
+	cudaMallocManaged(&c_rows_end_A, no_rows_A * sizeof(MKL_INT));
+	cudaMallocManaged(&c_col_index_A, rows_end_A[no_rows_A - 1] * sizeof(MKL_INT));
+	cudaMallocManaged(&c_col_index_A2, rows_end_A2[no_rows_A2 - 1] * sizeof(MKL_INT));
+	cudaMallocManaged(&c_values_A, rows_end_A[no_rows_A - 1] * sizeof(float));
+	cudaMallocManaged(&c_values_A2, rows_end_A2[no_rows_A2 - 1] * sizeof(float));
+
+	cudaDeviceSynchronize();
+
+	c_rows_start_A[0] = 1;
+
+	printf("NNZ of A = %d\n", rows_end_A[no_rows_A - 1]);
+	printf("NNZ of A2 = %d\n", rows_end_A2[no_rows_A2 - 1]);
+
+	for (int i = 0; i < no_rows_A; i++)
+	{
+		c_rows_start_A[i] = rows_start_A[i];
+		c_rows_end_A[i] = rows_end_A[i];
+		c_rows_start_A2[i] = rows_start_A2[i];
+		c_rows_end_A2[i] = rows_end_A2[i];
+	}
+	for (int i = 0; i < rows_end_A[no_rows_A - 1]; i++)
+	{
+		c_col_index_A[i] = col_index_A[i];
+		c_values_A[i] = values_A[i];
+	}
+	for (int i = 0; i < rows_end_A2[no_rows_A2 - 1]; i++)
+	{
+		c_col_index_A2[i] = col_index_A2[i];
+		c_values_A2[i] = values_A2[i];
+	}
+
 	/*printf("\nNNZ of A = %d\n", rows_start_A[no_rows_A] - sparse_index_A);
-	printf("NNZ of A^2 = %d\n", rows_start_A2[no_rows_A2]-sparse_index_A2);
-
-	printf("\nValues: \t");
-	for (int i = 0; i <10; i++)
-	{
-		printf("%.0f\t", values_A2[i]);
-	}
-	printf("\n");
-
-	printf("Columns: \t");
-	for (int i = 0; i < 10; i++)
-	{
-		printf("%d\t", col_index_A2[i]);
-	}
-	printf("\n");
-
-	printf("Rows_start: \t");
-	for (int i = 0; i < 10; i++)
-	{
-		printf("%d\t", rows_start_A2[i]);
-	}
-	printf("\n");
-
-	printf("Rows_end: \t");
-	for (int i = 0; i < 10; i++)
-	{
-		printf("%d\t", rows_end_A2[i]);
-	}
-	printf("\n");*/
+	printf("NNZ of A^2 = %d\n", rows_start_A2[no_rows_A2]-sparse_index_A2);*/
 
 	end = clock();
 	// Calculating total time taken by the program. 
@@ -158,9 +170,11 @@ int main()
 	start = clock();
 
 	// Hadamard product and sum together
-	int sum = 0;
+	int* results;
+	cudaMallocManaged(&results, no_rows_A * sizeof(int));
 	
-	sum = hadamard(rows_start_A2, rows_end_A2, col_index_A2, no_rows_A, rows_start_A, rows_end_A, col_index_A, values_A2, values_A);
+	hadamard<<<1,1>>>(results,c_rows_start_A2, c_rows_end_A2, c_col_index_A2, no_rows_A, c_rows_start_A, c_rows_end_A, c_col_index_A, c_values_A2, c_values_A);
+	cudaDeviceSynchronize();
 
 	end = clock();
 	// Calculating total time taken by the program. 
@@ -169,9 +183,9 @@ int main()
 	total_time_taken += time_taken;
 	printf("Wall time = %f\n", total_time_taken);
 
-	printf("\nsum = %d\n", sum);
+	printf("\nsum = %d\n", results[0]);
 
-	float nT = sum / 6;
+	float nT = results[0] / 6;
 	printf("nT = %.0f\n", nT);
 
 
@@ -181,5 +195,13 @@ int main()
 	free(row);
 	free(col);
 	free(val);
-
+	cudaFree(c_rows_start_A2);
+	cudaFree(c_rows_end_A2);
+	cudaFree(c_rows_start_A);
+	cudaFree(c_rows_end_A);
+	cudaFree(c_col_index_A);
+	cudaFree(c_col_index_A2);
+	cudaFree(c_values_A);
+	cudaFree(c_values_A2);
+	cudaFree(results);
 }
