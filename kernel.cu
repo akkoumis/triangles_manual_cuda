@@ -49,6 +49,27 @@ float* values_A2, float * values_A)
 	result[blockIdx.x * blockDim.x + threadIdx.x] = sum;
 }
 
+__global__ void multi(MKL_INT* rows_start_A2, MKL_INT* col_index_A2, MKL_INT no_rows_A, float* values_A)
+{
+	__shared__ MKL_INT row[];
+	int A_c_index = A_lower_bound;
+	int A2_c_index = A2_lower_bound;
+
+	while (A_c_index >= A_lower_bound && A_c_index <= A_upper_bound && A2_c_index >= A2_lower_bound && A2_c_index <= A2_upper_bound) {
+		if (col_index_A[A_c_index] == col_index_A2[A2_c_index]) {
+			sum += (int)(values_A[A_c_index] * values_A2[A2_c_index]);
+			A_c_index++;
+			A2_c_index++;
+		}
+		else if (col_index_A[A_c_index] < col_index_A2[A2_c_index]) {
+			A_c_index++;
+		}
+		else {
+			A2_c_index++;
+		}
+	}
+}
+
 int main()
 {
 	bool debugging = false;
@@ -159,6 +180,22 @@ int main()
 
 
 	start = clock();
+
+	for (int r_index = 0; r_index < no_rows_A; r_index++)// Processing each rows of the matrices
+	{
+		int A_lower_bound = rows_start_A[r_index] - 1;
+		int A_upper_bound = rows_start_A[r_index + 1] - 2;
+		int A2_lower_bound = rows_start_A2[r_index] - 1;
+		int A2_upper_bound = rows_start_A2[r_index + 1] - 2;
+
+		
+
+	}
+
+
+
+
+
 
 	struct matrix_descr generalDesc;
 	generalDesc.type = SPARSE_MATRIX_TYPE_GENERAL;
