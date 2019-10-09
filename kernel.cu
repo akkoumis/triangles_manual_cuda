@@ -10,18 +10,49 @@
 
 MKL_INT m = 5, nnz = 13;
 
+int hadamard(MKL_INT *rows_start_A2, MKL_INT *rows_end_A2, MKL_INT *col_index_A2, MKL_INT no_rows_A, MKL_INT * rows_start_A, MKL_INT * rows_end_A, MKL_INT * col_index_A,
+float* values_A2, float * values_A) 
+{
+	int sum = 0;
+	//#pragma omp parallel for shared(sum) reduction(+: sum)
+	for (int r_index = 0; r_index < no_rows_A; r_index++)// Processing each rows of the matrices
+	{
+		int A_lower_bound = rows_start_A[r_index] - 1;
+		int A_upper_bound = rows_end_A[r_index] - 2;
+		int A2_lower_bound = rows_start_A2[r_index] - 1;
+		int A2_upper_bound = rows_end_A2[r_index] - 2;
 
+		int A_c_index = A_lower_bound;
+		int A2_c_index = A2_lower_bound;
+
+		while (A_c_index >= A_lower_bound && A_c_index <= A_upper_bound && A2_c_index >= A2_lower_bound && A2_c_index <= A2_upper_bound) {
+			if (col_index_A[A_c_index] == col_index_A2[A2_c_index]) {
+				sum += (int)(values_A[A_c_index] * values_A2[A2_c_index]);
+				A_c_index++;
+				A2_c_index++;
+			}
+			else if (col_index_A[A_c_index] < col_index_A2[A2_c_index]) {
+				A_c_index++;
+			}
+			else {
+				A2_c_index++;
+			}
+		}
+
+	}
+	return sum;
+}
 
 int main()
 {
 	bool debugging = false;
 
-	//int NNZ = 6629222;	// auto
-	//MKL_INT sizeOfMatrix = 448695;
+	int NNZ = 6629222;	// auto
+	MKL_INT sizeOfMatrix = 448695;
 	//int NNZ = 16313034; // britain
 	//MKL_INT sizeOfMatrix = 7733822;
-	int NNZ = 25165738;	// delaunay
-	MKL_INT sizeOfMatrix = 4194304;
+	//int NNZ = 25165738;	// delaunay
+	//MKL_INT sizeOfMatrix = 4194304;
 
 	MKL_INT* row = (MKL_INT*)malloc(NNZ * sizeof(MKL_INT));
 	MKL_INT* col = (MKL_INT*)malloc(NNZ * sizeof(MKL_INT));
@@ -29,15 +60,15 @@ int main()
 	sparse_matrix_t A_COO, A, A2;
 	sparse_status_t status;
 	clock_t start, end;
-	double time_taken;
+	double time_taken, total_time_taken = 0;
 
 	FILE* fp;
 	//char buff[255];
 	int buff_int = 0;
 
-	//fp = fopen("auto_A.txt", "r");	//auto
+	fp = fopen("auto_A.txt", "r");	//auto
 	//fp = fopen("britain_A.txt", "r");	//britain
-	fp = fopen("delaunay_A.txt", "r");	//delaunay
+	//fp = fopen("delaunay_A.txt", "r");	//delaunay
 
 	for (int i = 0; i < NNZ; i++)
 	{
@@ -118,46 +149,25 @@ int main()
 	}
 	printf("\n");*/
 
-	//end = clock();
-	//// Calculating total time taken by the program. 
-	// time_taken = double(end - start) / double(CLOCKS_PER_SEC);
-	//printf("A^2 time = %f\n", time_taken);
-	//
-	//start = clock();
+	end = clock();
+	// Calculating total time taken by the program. 
+	time_taken = double(end - start) / double(CLOCKS_PER_SEC);
+	printf("A^2 time = %f\n", time_taken);
+	total_time_taken += time_taken;
+
+	start = clock();
 
 	// Hadamard product and sum together
 	int sum = 0;
-	//#pragma omp parallel for shared(sum) reduction(+: sum)
-	for (int r_index = 0; r_index < no_rows_A; r_index++)// Processing each rows of the matrices
-	{
-		int A_lower_bound = rows_start_A[r_index] - 1;
-		int A_upper_bound = rows_end_A[r_index] - 2;
-		int A2_lower_bound = rows_start_A2[r_index] - 1;
-		int A2_upper_bound = rows_end_A2[r_index] - 2;
-
-		int A_c_index = A_lower_bound;
-		int A2_c_index = A2_lower_bound;
-
-		while (A_c_index >= A_lower_bound && A_c_index <= A_upper_bound && A2_c_index >= A2_lower_bound && A2_c_index <= A2_upper_bound) {
-			if (col_index_A[A_c_index] == col_index_A2[A2_c_index]) {
-				sum += (int)(values_A[A_c_index] * values_A2[A2_c_index]);
-				A_c_index++;
-				A2_c_index++;
-			}
-			else if (col_index_A[A_c_index] < col_index_A2[A2_c_index]) {
-				A_c_index++;
-			}
-			else {
-				A2_c_index++;
-			}
-		}
-
-	}
+	
+	sum = hadamard(rows_start_A2, rows_end_A2, col_index_A2, no_rows_A, rows_start_A, rows_end_A, col_index_A, values_A2, values_A);
 
 	end = clock();
 	// Calculating total time taken by the program. 
 	time_taken = double(end - start) / double(CLOCKS_PER_SEC);
-	printf("Wall time = %f\n", time_taken);
+	printf("Hadamard time = %f\n", time_taken);
+	total_time_taken += time_taken;
+	printf("Wall time = %f\n", total_time_taken);
 
 	printf("\nsum = %d\n", sum);
 
