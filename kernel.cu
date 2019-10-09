@@ -51,8 +51,8 @@ float* values_A2, float * values_A)
 
 __global__ void multi(MKL_INT* rows_start_A2, MKL_INT* col_index_A2, MKL_INT no_rows_A, float* values_A)
 {
-	__shared__ MKL_INT row[];
-	int A_c_index = A_lower_bound;
+	__shared__ MKL_INT row;
+	/*int A_c_index = A_lower_bound;
 	int A2_c_index = A2_lower_bound;
 
 	while (A_c_index >= A_lower_bound && A_c_index <= A_upper_bound && A2_c_index >= A2_lower_bound && A2_c_index <= A2_upper_bound) {
@@ -67,7 +67,7 @@ __global__ void multi(MKL_INT* rows_start_A2, MKL_INT* col_index_A2, MKL_INT no_
 		else {
 			A2_c_index++;
 		}
-	}
+	}*/
 }
 
 int main()
